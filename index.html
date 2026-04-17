@@ -300,6 +300,30 @@
     cursor: pointer;
   }
 
+  /* ================= ESCALA DEL MAPA (estilo HUD) ================= */
+  /* La regla horizontal ocupa los 30px inferiores; subo la escala por encima */
+  .maplibregl-ctrl-bottom-left {
+    bottom: 36px !important;
+    left: 8px !important;
+  }
+  .maplibregl-ctrl-scale {
+    background: rgba(0, 20, 30, 0.75) !important;
+    border: 1px solid var(--hud-accent) !important;
+    border-top: none !important;
+    color: var(--hud-accent) !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 1px !important;
+    padding: 2px 8px !important;
+    text-shadow: 0 0 4px var(--hud-accent);
+    box-shadow:
+      0 0 10px rgba(0, 240, 255, 0.25),
+      inset 0 0 8px rgba(0, 240, 255, 0.05);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
   /* ================= LOGO PLED (esquina superior derecha) ================= */
   /* right: 48px deja espacio para la regla vertical (30px) + 18px de margen */
   .pled-logo {
@@ -1312,7 +1336,8 @@ const map = new maplibregl.Map({
   antialias: true
 });
 
-map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-right');
+// Escala del mapa tipo Google Maps — bottom-left, por encima de la regla horizontal
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 160, unit: 'metric' }), 'bottom-left');
 
 /* ============================================================
    MARCADORES Y LÍMITES DE REGIÓN
