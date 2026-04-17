@@ -70,10 +70,10 @@
   [data-mode="dark"] #map .maplibregl-canvas {
     filter: contrast(1.04) saturate(0.95) brightness(1.02) hue-rotate(-5deg);
   }
-  /* En modo SAT los tiles de MapTiler (Maxar+Airbus) son naturalmente oscuros —
-     aplicamos un lift extra de brillo y saturación para que no se vea opaco */
+  /* En modo SAT damos solo un lift mínimo — para que el mar quede
+     teal/navy medio (no muy oscuro ni demasiado celeste) */
   [data-mode="dark"][data-layer-mode="sat"] #map .maplibregl-canvas {
-    filter: contrast(1.0) saturate(1.15) brightness(1.14) hue-rotate(-4deg);
+    filter: contrast(1.02) saturate(1.05) brightness(1.04) hue-rotate(-4deg);
   }
 
   /* Grid de radar superpuesto */
@@ -1665,8 +1665,8 @@ function lightenOcean() {
       source: vectorSourceId,
       'source-layer': 'water',
       paint: {
-        'fill-color': '#4a8bc0',   // azul medio claro (más vibrante que el hybrid default)
-        'fill-opacity': 0.82
+        'fill-color': '#2a5670',   // teal-navy medio (matching la foto de referencia)
+        'fill-opacity': 0.55
       }
     }, beforeId);
   } catch (err) {
