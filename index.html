@@ -301,24 +301,25 @@
   }
 
   /* ================= LOGO PLED (esquina superior derecha) ================= */
+  /* right: 48px deja espacio para la regla vertical (30px) + 18px de margen */
   .pled-logo {
     position: absolute;
     top: 14px;
-    right: 18px;
-    height: 36px;          /* altura compacta para no invadir el HUD */
+    right: 48px;
+    height: 52px;          /* más grande para presencia clara de marca */
     width: auto;
     z-index: 40;           /* por encima del mapa y el HUD */
-    opacity: 0.85;
+    opacity: 0.9;
     pointer-events: none;  /* no bloquea interacciones con el mapa */
     filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));
     user-select: none;
   }
-  /* En pantallas bajitas (ultra-wide), un poco más pequeño para no chocar con los botones */
+  /* En pantallas bajitas (ultra-wide), un poco más compacto */
   @media (max-height: 820px) {
     .pled-logo {
-      height: 28px;
+      height: 42px;
       top: 10px;
-      right: 14px;
+      right: 44px;
     }
   }
 
