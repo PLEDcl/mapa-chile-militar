@@ -300,6 +300,36 @@
     cursor: pointer;
   }
 
+  /* ================= INFO CONNECTOR (línea del punto al panel) ================= */
+  .info-connector {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 25; /* detrás del info-panel (30), encima del mapa */
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .info-connector.visible { opacity: 1; }
+  .info-connector line {
+    stroke: var(--hud-accent);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    filter: drop-shadow(0 0 3px rgba(0, 240, 255, 0.6));
+  }
+  .info-connector circle {
+    fill: var(--hud-accent);
+    filter: drop-shadow(0 0 5px rgba(0, 240, 255, 0.9));
+  }
+  #info-connector-dot {
+    fill: none;
+    stroke: var(--hud-accent);
+    stroke-width: 1;
+  }
+  #info-connector-dot-inner {
+    fill: var(--hud-accent);
+  }
+
   /* ================= INFO PANEL (Star Wars) ================= */
   .info-panel {
     position: absolute;
@@ -842,6 +872,13 @@
   <div class="measure-readout" id="measure-readout">
     DISTANCIA: <b id="measure-dist">0.00 km</b> | SEGMENTOS: <b id="measure-seg">0</b>
   </div>
+
+  <!-- CONECTOR: línea desde el punto seleccionado al info-panel -->
+  <svg class="info-connector" id="info-connector" xmlns="http://www.w3.org/2000/svg">
+    <line id="info-connector-line" x1="0" y1="0" x2="0" y2="0"></line>
+    <circle id="info-connector-dot" cx="0" cy="0" r="5"></circle>
+    <circle id="info-connector-dot-inner" cx="0" cy="0" r="2"></circle>
+  </svg>
 
   <!-- INFO PANEL -->
   <div class="info-panel" id="info-panel">
@@ -1392,6 +1429,72 @@ const infoCode = document.getElementById('info-code');
 const infoCoord = document.getElementById('info-coord');
 const infoBody = document.getElementById('info-body');
 
+/* --- Conector: línea desde el punto seleccionado hacia el info-panel --- */
+const infoConnector = document.getElementById('info-connector');
+const connectorLine = document.getElementById('info-connector-line');
+const connectorDotOuter = document.getElementById('info-connector-dot');
+const connectorDotInner = document.getElementById('info-connector-dot-inner');
+let currentAnchorLngLat = null; // coord de la región activa (null si no hay panel)
+
+function updateInfoConnector() {
+  if (!currentAnchorLngLat || !infoPanel.classList.contains('visible')) {
+    infoConnector.classList.remove('visible');
+    return;
+  }
+  // Proyectar lng/lat a pixeles de pantalla
+  const p = map.project(currentAnchorLngLat);
+  // Rect del panel y del mapa para coordenadas relativas al contenedor del mapa
+  const panelRect = infoPanel.getBoundingClientRect();
+  const mapRect = map.getContainer().getBoundingClientRect();
+  const panelLeft = panelRect.left - mapRect.left;
+  const panelRight = panelRect.right - mapRect.left;
+  const panelTop = panelRect.top - mapRect.top;
+  const panelBottom = panelRect.bottom - mapRect.top;
+  // Elegir el punto de anclaje en el borde del panel más cercano al punto del mapa
+  let attachX, attachY;
+  if (p.x < panelLeft)       attachX = panelLeft;
+  else if (p.x > panelRight) attachX = panelRight;
+  else                       attachX = p.x;
+  if (p.y < panelTop)        attachY = panelTop;
+  else if (p.y > panelBottom) attachY = panelBottom;
+  else                       attachY = p.y;
+  // Dibujar línea + punto
+  connectorLine.setAttribute('x1', p.x);
+  connectorLine.setAttribute('y1', p.y);
+  connectorLine.setAttribute('x2', attachX);
+  connectorLine.setAttribute('y2', attachY);
+  connectorDotOuter.setAttribute('cx', p.x);
+  connectorDotOuter.setAttribute('cy', p.y);
+  connectorDotInner.setAttribute('cx', p.x);
+  connectorDotInner.setAttribute('cy', p.y);
+  infoConnector.classList.add('visible');
+}
+
+// Re-dibujar el conector mientras el mapa se mueve/zoomea/rota
+map.on('move', updateInfoConnector);
+map.on('rotate', updateInfoConnector);
+map.on('pitch', updateInfoConnector);
+window.addEventListener('resize', updateInfoConnector);
+
+// Animar el conector durante la transición CSS del panel (opacity+transform 0.3s)
+function animateConnectorFor(duration = 500) {
+  const start = performance.now();
+  function frame() {
+    updateInfoConnector();
+    if (performance.now() - start < duration) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function setInfoAnchor(lngLat) {
+  currentAnchorLngLat = lngLat;
+  animateConnectorFor(500);
+}
+function clearInfoAnchor() {
+  currentAnchorLngLat = null;
+  infoConnector.classList.remove('visible');
+}
+
 function fmtNum(n) { return n.toLocaleString('es-CL'); }
 function fmtCoord([lng, lat]) {
   return `${Math.abs(lat).toFixed(4)}°${lat<0?'S':'N'} / ${Math.abs(lng).toFixed(4)}°${lng<0?'W':'E'}`;
@@ -1424,6 +1527,7 @@ function showRegionInfo(reg) {
     </div>
   `;
   infoPanel.classList.add('visible');
+  setInfoAnchor(reg.coord);
   map.flyTo({ center: reg.coord, zoom: 6.5, duration: 1400, pitch: map.getPitch() });
 }
 
@@ -1447,11 +1551,13 @@ function showCityInfo(reg, ciudad) {
     <div class="info-desc">${reg.economia}</div>
   `;
   infoPanel.classList.add('visible');
+  setInfoAnchor(ciudad.coord);
   map.flyTo({ center: ciudad.coord, zoom: 11, duration: 1400, pitch: map.getPitch() });
 }
 
 document.getElementById('info-close').addEventListener('click', () => {
   infoPanel.classList.remove('visible');
+  clearInfoAnchor();
 });
 
 /* Lista de regiones */
