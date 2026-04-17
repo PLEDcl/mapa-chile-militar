@@ -1241,10 +1241,10 @@ const HORIZONTAL_BEARING = 90;
 const map = new maplibregl.Map({
   container: 'map',
   style: STYLES.sat,
-  center: [-71.5, -38.5],   // centro de Chile
-  zoom: 4.2,
+  center: [0, 20],          // centro del mundo (levemente al norte para compensar Mercator)
+  zoom: 1,                  // zoom mínimo — fitBounds en on('load') ajusta al canvas
   pitch: 0,
-  bearing: HORIZONTAL_BEARING,
+  bearing: 0,               // orientación estándar (norte arriba)
   attributionControl: { compact: true },
   antialias: true
 });
@@ -1527,18 +1527,20 @@ document.querySelectorAll('[data-layer]').forEach(btn => {
 pitchRange.addEventListener('input', e => map.setPitch(+e.target.value));
 bearingRange.addEventListener('input', e => map.setBearing(+e.target.value));
 
-document.getElementById('btn-reset-view').addEventListener('click', () => {
-  // RESET = plano completo del mundo, bearing 0° (norte arriba), pitch 0°, zoom mínimo.
-  // fitBounds con el mundo entero calcula automáticamente el zoom más bajo que entra en el canvas.
+// Vista por defecto = mundo completo, bearing 0° (norte arriba), pitch 0°, zoom mínimo.
+// Se usa tanto en el botón RESET como en el auto-encuadre inicial al cargar el mapa.
+function fitWorldView(animate = true) {
   const WORLD_BOUNDS = [[-180, -85], [180, 85]];
   map.fitBounds(WORLD_BOUNDS, {
     bearing: 0,
     pitch: 0,
     padding: 20,
-    duration: 900,
+    duration: animate ? 900 : 0,
     linear: false
   });
-});
+}
+
+document.getElementById('btn-reset-view').addEventListener('click', () => fitWorldView(true));
 
 function fitChileHorizontal() {
   // Encuadra Chile de extremo a extremo: Arica (N = -17.5°) hasta Cabo de Hornos (S = -56°).
@@ -1783,8 +1785,9 @@ map.on('load', async () => {
   await loadRegionGeoJSON();
   addRegionLayer();
   updateHUD();
-  // Auto-encuadre horizontal de Chile al cargar
-  fitChileHorizontal();
+  // Vista inicial = RESET (mundo completo, bearing 0°, zoom mínimo).
+  // animate=false porque es la primera renderización, no tiene sentido animar desde el estado inicial.
+  fitWorldView(false);
 
   // Click sobre región (polígono) -> abrir panel.
   // Estrategia:
