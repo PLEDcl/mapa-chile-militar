@@ -66,9 +66,14 @@
     background: #000;
   }
 
-  /* Filtro sci-fi sobre el mapa (modo oscuro) */
+  /* Filtro sci-fi sobre el mapa (modo oscuro) — suave, sin oscurecer */
   [data-mode="dark"] #map .maplibregl-canvas {
-    filter: contrast(1.08) saturate(0.85) brightness(0.92) hue-rotate(-8deg);
+    filter: contrast(1.04) saturate(0.95) brightness(1.02) hue-rotate(-5deg);
+  }
+  /* En modo SAT los tiles de MapTiler (Maxar+Airbus) son naturalmente oscuros —
+     aplicamos un lift extra de brillo y saturación para que no se vea opaco */
+  [data-mode="dark"][data-layer-mode="sat"] #map .maplibregl-canvas {
+    filter: contrast(1.0) saturate(1.15) brightness(1.14) hue-rotate(-4deg);
   }
 
   /* Grid de radar superpuesto */
@@ -1634,11 +1639,22 @@ document.querySelectorAll('[data-layer]').forEach(btn => {
 ------------------------------------------------------------ */
 function lightenOcean() {
   if (currentLayer !== 'sat') return;
-  if (!map.getSource('openmaptiles')) return; // el estilo todavía no expone la fuente vectorial
-  // Encontrar primera capa de labels para insertar el tintado debajo (que no tape nombres)
-  const layers = map.getStyle().layers || [];
+  const style = map.getStyle();
+  if (!style) return;
+  const sources = style.sources || {};
+  // Buscar la primera fuente VECTORIAL (el nombre varía según el estilo MapTiler:
+  // 'openmaptiles', 'maptiler_planet', 'composite', etc.)
+  let vectorSourceId = null;
+  for (const [id, src] of Object.entries(sources)) {
+    if (src.type === 'vector') { vectorSourceId = id; break; }
+  }
+  if (!vectorSourceId) {
+    console.warn('[ocean-tint] no se encontró fuente vectorial. Fuentes:', Object.keys(sources));
+    return;
+  }
+  // Insertar el tint DEBAJO del primer symbol (labels) para no tapar nombres
   let beforeId = null;
-  for (const l of layers) {
+  for (const l of style.layers || []) {
     if (l.type === 'symbol') { beforeId = l.id; break; }
   }
   try {
@@ -1646,15 +1662,15 @@ function lightenOcean() {
     map.addLayer({
       id: 'ocean-tint',
       type: 'fill',
-      source: 'openmaptiles',
+      source: vectorSourceId,
       'source-layer': 'water',
       paint: {
-        'fill-color': '#3d6d96',   // azul medio (matching al Esri anterior)
-        'fill-opacity': 0.72
+        'fill-color': '#4a8bc0',   // azul medio claro (más vibrante que el hybrid default)
+        'fill-opacity': 0.82
       }
     }, beforeId);
   } catch (err) {
-    console.warn('No se pudo aplicar tintado de océano:', err);
+    console.warn('[ocean-tint] fallo al agregar layer:', err);
   }
 }
 
