@@ -300,6 +300,28 @@
     cursor: pointer;
   }
 
+  /* ================= LOGO PLED (esquina superior derecha) ================= */
+  .pled-logo {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    height: 36px;          /* altura compacta para no invadir el HUD */
+    width: auto;
+    z-index: 40;           /* por encima del mapa y el HUD */
+    opacity: 0.85;
+    pointer-events: none;  /* no bloquea interacciones con el mapa */
+    filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.4));
+    user-select: none;
+  }
+  /* En pantallas bajitas (ultra-wide), un poco más pequeño para no chocar con los botones */
+  @media (max-height: 820px) {
+    .pled-logo {
+      height: 28px;
+      top: 10px;
+      right: 14px;
+    }
+  }
+
   /* ================= INFO CONNECTOR (línea del punto al panel) ================= */
   .info-connector {
     position: absolute;
@@ -778,6 +800,9 @@
   <div class="hud-grid-overlay"></div>
   <div class="hud-scanline"></div>
   <div class="hud-crosshair"></div>
+
+  <!-- LOGO PLED (esquina superior derecha) -->
+  <img src="assets/pled-logo.png" alt="PLED" class="pled-logo" />
 
   <!-- HORIZONTAL TOP BAR: HUD + CONTROLES -->
   <div class="hud-controls">
