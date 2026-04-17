@@ -1619,9 +1619,44 @@ document.querySelectorAll('[data-layer]').forEach(btn => {
     map.once('styledata', () => {
       addRegionLayer();
       buildMarkers();
+      lightenOcean();
     });
   });
 });
+
+/* ------------------------------------------------------------
+   TINTADO DE OCÉANO EN MODO SATÉLITE
+   Las imágenes Maxar/Airbus de MapTiler hybrid muestran el mar
+   muy oscuro (igual que Google Earth). Agregamos una capa vectorial
+   de agua con color azul medio y opacidad parcial encima del raster
+   para aclararlo y darle el look que tenía el mapa con Esri.
+   Solo se aplica cuando el estilo actual es 'sat' (hybrid).
+------------------------------------------------------------ */
+function lightenOcean() {
+  if (currentLayer !== 'sat') return;
+  if (!map.getSource('openmaptiles')) return; // el estilo todavía no expone la fuente vectorial
+  // Encontrar primera capa de labels para insertar el tintado debajo (que no tape nombres)
+  const layers = map.getStyle().layers || [];
+  let beforeId = null;
+  for (const l of layers) {
+    if (l.type === 'symbol') { beforeId = l.id; break; }
+  }
+  try {
+    if (map.getLayer('ocean-tint')) map.removeLayer('ocean-tint');
+    map.addLayer({
+      id: 'ocean-tint',
+      type: 'fill',
+      source: 'openmaptiles',
+      'source-layer': 'water',
+      paint: {
+        'fill-color': '#3d6d96',   // azul medio (matching al Esri anterior)
+        'fill-opacity': 0.72
+      }
+    }, beforeId);
+  } catch (err) {
+    console.warn('No se pudo aplicar tintado de océano:', err);
+  }
+}
 
 pitchRange.addEventListener('input', e => map.setPitch(+e.target.value));
 bearingRange.addEventListener('input', e => map.setBearing(+e.target.value));
@@ -1882,6 +1917,7 @@ map.on('load', async () => {
   buildMarkers();
   await loadRegionGeoJSON();
   addRegionLayer();
+  lightenOcean();  // aclarar mar si estamos en SAT (default)
   updateHUD();
   // Vista inicial = RESET (mundo completo, bearing 0°, zoom mínimo).
   // animate=false porque es la primera renderización, no tiene sentido animar desde el estado inicial.
