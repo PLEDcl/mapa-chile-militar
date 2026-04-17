@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mapa-chile-militar",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "-p", "4200", "-c-1", "."],
+      "cwd": ".",
+      "port": 4200
+    }
+  ]
+}

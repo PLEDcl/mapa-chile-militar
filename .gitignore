@@ -1,0 +1,23 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node (por si en el futuro agregas dependencias)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# Logs
+*.log
+
+# Claude local (preview server logs, cache, etc.)
+.claude/cache/
+.claude/logs/
+.claude/settings.local.json

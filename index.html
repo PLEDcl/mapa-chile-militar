@@ -1,0 +1,1847 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TACMAP // CHILE — RECON GRID 1:1.000.000</title>
+
+<!-- MapLibre GL JS: soporta pitch/bearing nativos (ángulo 3D + rotación) -->
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+<!-- Fuentes: Orbitron (sci-fi) + Share Tech Mono (HUD) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --hud-accent: #00f0ff;
+    --hud-accent-dim: #0891a8;
+    --hud-warn: #ff9d00;
+    --hud-danger: #ff2a6d;
+    --hud-ok: #05ff9d;
+    --hud-bg: rgba(3, 10, 18, 0.88);
+    --hud-bg-solid: #030a12;
+    --hud-panel: rgba(5, 18, 32, 0.82);
+    --hud-grid: rgba(0, 240, 255, 0.22);
+    --hud-text: #cfe9f0;
+    --hud-text-dim: #7aa0ad;
+    --hud-border: rgba(0, 240, 255, 0.45);
+  }
+
+  [data-mode="light"] {
+    --hud-accent: #0a5e6b;
+    --hud-accent-dim: #0a5e6b;
+    --hud-bg: rgba(230, 240, 245, 0.92);
+    --hud-bg-solid: #e6f0f5;
+    --hud-panel: rgba(240, 248, 252, 0.92);
+    --hud-grid: rgba(10, 94, 107, 0.25);
+    --hud-text: #0a2833;
+    --hud-text-dim: #4a6b75;
+    --hud-border: rgba(10, 94, 107, 0.55);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    background: #000;
+    font-family: 'Rajdhani', 'Share Tech Mono', monospace;
+    color: var(--hud-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ================= MAP ================= */
+  #map {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 30px;       /* espacio para regla vertical */
+    bottom: 30px;      /* espacio para regla horizontal */
+    background: #000;
+  }
+
+  /* Filtro sci-fi sobre el mapa (modo oscuro) */
+  [data-mode="dark"] #map .maplibregl-canvas {
+    filter: contrast(1.08) saturate(0.85) brightness(0.92) hue-rotate(-8deg);
+  }
+
+  /* Grid de radar superpuesto */
+  .hud-grid-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 30px; bottom: 30px;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--hud-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--hud-grid) 1px, transparent 1px);
+    background-size: 120px 120px;
+    opacity: 0.35;
+    mix-blend-mode: screen;
+    z-index: 2;
+  }
+
+  [data-mode="light"] .hud-grid-overlay { mix-blend-mode: multiply; opacity: 0.2; }
+
+  /* Scanline */
+  .hud-scanline {
+    position: absolute;
+    top: 0; left: 0; right: 30px; bottom: 30px;
+    pointer-events: none;
+    background: linear-gradient(to bottom,
+      transparent 0%,
+      rgba(0, 240, 255, 0.04) 50%,
+      transparent 100%);
+    background-size: 100% 4px;
+    z-index: 3;
+    opacity: 0.5;
+  }
+  [data-mode="light"] .hud-scanline { display: none; }
+
+  /* Cross-hair central del radar */
+  .hud-crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 80px; height: 80px;
+    margin-top: -40px; margin-left: -40px;
+    pointer-events: none;
+    z-index: 4;
+    opacity: 0.35;
+  }
+  .hud-crosshair::before, .hud-crosshair::after {
+    content: '';
+    position: absolute;
+    background: var(--hud-accent);
+    box-shadow: 0 0 8px var(--hud-accent);
+  }
+  .hud-crosshair::before { top: 50%; left: 0; right: 0; height: 1px; }
+  .hud-crosshair::after { left: 50%; top: 0; bottom: 0; width: 1px; }
+
+  /* ================= HUD BOX (inline) ================= */
+  .hud-box {
+    background: var(--hud-bg);
+    border: 1px solid var(--hud-border);
+    padding: 0 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--hud-text);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    position: relative;
+    pointer-events: auto;
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.15), inset 0 0 20px rgba(0, 240, 255, 0.04);
+    display: flex;
+    align-items: center;
+    height: 36px;
+  }
+
+  /* Corners decorativos */
+  .hud-box::before, .hud-box::after {
+    content: '';
+    position: absolute;
+    width: 8px; height: 8px;
+    border-color: var(--hud-accent);
+    border-style: solid;
+  }
+  .hud-box::before {
+    top: -1px; left: -1px;
+    border-width: 2px 0 0 2px;
+  }
+  .hud-box::after {
+    bottom: -1px; right: -1px;
+    border-width: 0 2px 2px 0;
+  }
+
+  .hud-title {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: var(--hud-accent);
+    text-shadow: 0 0 8px var(--hud-accent);
+  }
+
+  .hud-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+  }
+  .hud-meta span b {
+    color: var(--hud-accent);
+    font-weight: 700;
+    margin-right: 4px;
+  }
+
+  .hud-live-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--hud-ok);
+    box-shadow: 0 0 8px var(--hud-ok);
+    margin-right: 6px;
+    animation: pulse 1.4s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ================= HORIZONTAL CONTROL BAR ================= */
+  .hud-controls {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    right: 42px;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .ctrl-group {
+    background: var(--hud-bg);
+    border: 1px solid var(--hud-border);
+    padding: 6px 10px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    position: relative;
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.12);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+    height: 36px;
+  }
+  .ctrl-group.wide { min-width: 200px; }
+
+  .ctrl-group::before, .ctrl-group::after {
+    content: '';
+    position: absolute;
+    width: 8px; height: 8px;
+    border-color: var(--hud-accent);
+    border-style: solid;
+  }
+  .ctrl-group::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+  .ctrl-group::after { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+
+  .ctrl-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--hud-accent);
+    text-shadow: 0 0 6px var(--hud-accent);
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ctrl-label .val {
+    color: var(--hud-text-dim);
+    font-weight: 400;
+    letter-spacing: 0.5px;
+    min-width: 32px;
+    text-align: right;
+  }
+
+  .ctrl-btn {
+    background: transparent;
+    border: 1px solid var(--hud-border);
+    color: var(--hud-text);
+    padding: 4px 9px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    height: 24px;
+    line-height: 1;
+  }
+  .ctrl-btn:hover {
+    background: var(--hud-accent);
+    color: var(--hud-bg-solid);
+    box-shadow: 0 0 12px var(--hud-accent);
+  }
+  .ctrl-btn.active {
+    background: var(--hud-accent);
+    color: var(--hud-bg-solid);
+    box-shadow: 0 0 10px var(--hud-accent);
+  }
+  .ctrl-btn.warn.active { background: var(--hud-warn); box-shadow: 0 0 10px var(--hud-warn); }
+  .ctrl-btn.danger:hover { background: var(--hud-danger); box-shadow: 0 0 12px var(--hud-danger); }
+
+  .ctrl-range {
+    -webkit-appearance: none;
+    background: transparent;
+    width: 90px;
+    height: 16px;
+    margin: 0;
+  }
+  .ctrl-range::-webkit-slider-runnable-track {
+    height: 4px;
+    background: linear-gradient(to right, var(--hud-accent-dim), var(--hud-accent));
+    border: 1px solid var(--hud-border);
+  }
+  .ctrl-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    background: var(--hud-accent);
+    border: 2px solid var(--hud-bg-solid);
+    margin-top: -5px;
+    box-shadow: 0 0 8px var(--hud-accent);
+    cursor: pointer;
+  }
+
+  /* ================= INFO PANEL (Star Wars) ================= */
+  .info-panel {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-20px);
+    width: 440px;
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-accent);
+    padding: 0;
+    z-index: 30;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s, transform 0.3s;
+    box-shadow:
+      0 0 40px rgba(0, 240, 255, 0.4),
+      inset 0 0 40px rgba(0, 240, 255, 0.05);
+    clip-path: polygon(
+      0 12px, 12px 0,
+      calc(100% - 12px) 0, 100% 12px,
+      100% calc(100% - 12px), calc(100% - 12px) 100%,
+      12px 100%, 0 calc(100% - 12px)
+    );
+  }
+  .info-panel.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+  }
+  /* En layouts ultra-wide bajitos, mover info panel a la derecha */
+  @media (max-height: 820px) {
+    .info-panel {
+      left: auto;
+      right: 60px;
+      top: 60px;
+      transform: translateY(-20px);
+      max-height: calc(100vh - 160px);
+      width: 400px;
+    }
+    .info-panel.visible {
+      transform: translateY(0);
+    }
+  }
+
+  .info-header {
+    background: linear-gradient(90deg, var(--hud-accent-dim), transparent);
+    padding: 12px 18px 10px;
+    border-bottom: 1px solid var(--hud-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .info-header h2 {
+    margin: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 16px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: #fff;
+    text-shadow: 0 0 10px var(--hud-accent);
+    text-transform: uppercase;
+  }
+  .info-header .close-btn {
+    background: transparent;
+    border: 1px solid var(--hud-border);
+    color: var(--hud-text);
+    width: 24px; height: 24px;
+    cursor: pointer;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .info-header .close-btn:hover { background: var(--hud-danger); border-color: var(--hud-danger); color: #fff; }
+
+  .info-subheader {
+    padding: 8px 18px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--hud-accent);
+    letter-spacing: 2px;
+    border-bottom: 1px dashed var(--hud-border);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .info-body {
+    padding: 14px 18px;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dotted rgba(0, 240, 255, 0.15);
+    font-size: 13px;
+  }
+  .info-row .label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--hud-text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .info-row .value {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+    color: var(--hud-text);
+    text-align: right;
+  }
+  .info-row .value b {
+    color: var(--hud-accent);
+    font-weight: 700;
+  }
+
+  .info-section-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--hud-accent);
+    margin: 14px 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--hud-border);
+    text-transform: uppercase;
+  }
+
+  .info-desc {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--hud-text);
+    margin: 8px 0;
+  }
+
+  .info-cities {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 10px;
+    margin-top: 8px;
+    font-size: 12px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .info-cities div {
+    padding: 3px 0;
+    color: var(--hud-text);
+  }
+  .info-cities div::before {
+    content: '▸ ';
+    color: var(--hud-accent);
+  }
+
+  /* ================= MEASURE READOUT ================= */
+  .measure-readout {
+    position: absolute;
+    bottom: 82px;
+    left: 12px;
+    z-index: 20;
+    background: var(--hud-bg);
+    border: 1px solid var(--hud-border);
+    padding: 8px 14px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--hud-accent);
+    display: none;
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+  }
+  .measure-readout.visible { display: block; }
+  .measure-readout b {
+    color: var(--hud-warn);
+    text-shadow: 0 0 6px var(--hud-warn);
+  }
+
+  /* ================= RULERS ================= */
+  .ruler-h {
+    position: absolute;
+    bottom: 0; left: 0; right: 30px;
+    height: 30px;
+    background: var(--hud-bg-solid);
+    border-top: 1px solid var(--hud-accent);
+    overflow: hidden;
+    z-index: 15;
+  }
+  .ruler-v {
+    position: absolute;
+    top: 0; right: 0;
+    width: 30px;
+    bottom: 30px;
+    background: var(--hud-bg-solid);
+    border-left: 1px solid var(--hud-accent);
+    overflow: hidden;
+    z-index: 15;
+  }
+
+  .ruler-corner {
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 30px; height: 30px;
+    background: var(--hud-bg-solid);
+    border-top: 1px solid var(--hud-accent);
+    border-left: 1px solid var(--hud-accent);
+    z-index: 16;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    color: var(--hud-accent);
+    text-shadow: 0 0 6px var(--hud-accent);
+  }
+
+  .ruler-svg { width: 100%; height: 100%; display: block; }
+
+  .ruler-label-global {
+    position: absolute;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--hud-accent);
+    text-shadow: 0 0 4px var(--hud-accent);
+    letter-spacing: 1px;
+    z-index: 17;
+    background: var(--hud-bg-solid);
+    padding: 1px 6px;
+    border: 1px solid var(--hud-accent);
+    pointer-events: none;
+  }
+  .ruler-label-h {
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .ruler-label-v {
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%) rotate(-90deg);
+    transform-origin: center;
+    white-space: nowrap;
+  }
+
+  /* ================= COMPASS ================= */
+  .compass {
+    position: absolute;
+    bottom: 88px;
+    right: 48px;
+    width: 80px; height: 80px;
+    z-index: 20;
+    pointer-events: none;
+  }
+  .compass-ring {
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    border: 1px solid var(--hud-border);
+    background: var(--hud-bg);
+    position: relative;
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+    /* El anillo entero (labels N/S/E/W + rosa) gira según el bearing del mapa,
+       así N siempre apunta al norte real aunque el mapa esté rotado. */
+    transition: transform 0.2s;
+  }
+  .compass-rose {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 70%; height: 70%;
+    transform: translate(-50%, -50%);
+  }
+  .compass-rose svg { width: 100%; height: 100%; }
+  .compass-label {
+    position: absolute;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--hud-accent);
+    text-shadow: 0 0 4px var(--hud-accent);
+  }
+  .compass-label.n { top: 4px; left: 50%; transform: translateX(-50%); color: var(--hud-danger); text-shadow: 0 0 6px var(--hud-danger); }
+  .compass-label.s { bottom: 4px; left: 50%; transform: translateX(-50%); }
+  .compass-label.e { right: 6px; top: 50%; transform: translateY(-50%); }
+  .compass-label.w { left: 6px; top: 50%; transform: translateY(-50%); }
+
+  /* ================= REGION BAR (HORIZONTAL) ================= */
+  .region-list {
+    position: absolute;
+    left: 12px;
+    right: 42px;
+    bottom: 42px;
+    z-index: 19;
+    height: 32px;
+    background: var(--hud-bg);
+    border: 1px solid var(--hud-border);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.12);
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+  }
+  .region-list-header {
+    padding: 0 14px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--hud-accent);
+    border-right: 1px solid var(--hud-border);
+    background: linear-gradient(90deg, var(--hud-accent-dim), transparent);
+    text-shadow: 0 0 4px var(--hud-accent);
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+  #region-list-body {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: 1;
+  }
+  .region-item {
+    padding: 0 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--hud-text);
+    cursor: pointer;
+    border-right: 1px dotted rgba(0, 240, 255, 0.2);
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+  }
+  .region-item:hover {
+    background: var(--hud-accent);
+    color: var(--hud-bg-solid);
+  }
+  .region-item .num {
+    color: var(--hud-accent);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .region-item:hover .num { color: var(--hud-bg-solid); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--hud-bg-solid); }
+  ::-webkit-scrollbar-thumb { background: var(--hud-accent-dim); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--hud-accent); }
+
+  /* Marker personalizado */
+  .city-marker {
+    width: 10px; height: 10px;
+    background: var(--hud-accent);
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--hud-accent), 0 0 20px var(--hud-accent);
+    cursor: pointer;
+    position: relative;
+    animation: markerPulse 2s infinite;
+  }
+  .city-marker.capital {
+    width: 14px; height: 14px;
+    background: var(--hud-danger);
+    box-shadow: 0 0 12px var(--hud-danger), 0 0 24px var(--hud-danger);
+  }
+  .city-marker.regional-capital {
+    width: 12px; height: 12px;
+    background: var(--hud-warn);
+    box-shadow: 0 0 10px var(--hud-warn), 0 0 20px var(--hud-warn);
+  }
+  @keyframes markerPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+  }
+  .city-marker::after {
+    content: attr(data-name);
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--hud-text);
+    background: var(--hud-bg);
+    padding: 2px 6px;
+    border: 1px solid var(--hud-border);
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  }
+  .city-marker:hover::after { opacity: 1; }
+
+  /* Controles Maplibre ocultar navegación default, usar custom */
+  .maplibregl-ctrl-attrib {
+    background: var(--hud-bg) !important;
+    color: var(--hud-text-dim) !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 9px !important;
+  }
+  .maplibregl-ctrl-attrib a { color: var(--hud-accent) !important; }
+
+  /* BOOT screen */
+  #boot {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    color: var(--hud-accent);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    padding: 40px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: opacity 0.6s;
+  }
+  #boot .glow {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 32px;
+    font-weight: 900;
+    letter-spacing: 6px;
+    color: #fff;
+    text-shadow: 0 0 20px var(--hud-accent);
+    margin-bottom: 20px;
+  }
+  #boot .line::before { content: '> '; color: var(--hud-ok); }
+  #boot.hidden { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body data-mode="dark">
+
+  <!-- BOOT SEQUENCE -->
+  <div id="boot">
+    <div class="glow">TACMAP CL // v1.0</div>
+    <div class="line">INITIALIZING RECON GRID...</div>
+    <div class="line">LOADING SATELLITE FEED [ESRI WORLD IMAGERY]...</div>
+    <div class="line">LOADING CARTOGRAPHIC OVERLAY [1:1.000.000]...</div>
+    <div class="line">INDEXING 16 REGIONES OPERACIONALES...</div>
+    <div class="line">CALIBRATING GEOREFERENCE SYSTEM...</div>
+    <div class="line" style="color: var(--hud-ok);">SYSTEM ONLINE. STANDBY FOR TACTICAL DISPLAY.</div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map"></div>
+
+  <!-- HUD OVERLAYS -->
+  <div class="hud-grid-overlay"></div>
+  <div class="hud-scanline"></div>
+  <div class="hud-crosshair"></div>
+
+  <!-- HORIZONTAL TOP BAR: HUD + CONTROLES -->
+  <div class="hud-controls">
+    <div class="hud-box">
+      <div class="hud-title"><span class="hud-live-dot"></span>TACMAP // CHILE</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-meta">
+        <span><b>LAT</b><span id="meta-lat">—</span></span>
+        <span><b>LON</b><span id="meta-lon">—</span></span>
+        <span><b>Z</b><span id="meta-zoom">—</span></span>
+        <span><b>BRG</b><span id="meta-brg">000°</span></span>
+        <span><b>PIT</b><span id="meta-pitch">00°</span></span>
+      </div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-meta">
+        <span><b>UTC</b><span id="meta-utc">—</span></span>
+        <span><b>LOC</b><span id="meta-local">—</span></span>
+      </div>
+    </div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">CAPA</span>
+      <button class="ctrl-btn active" data-layer="sat">SAT</button>
+      <button class="ctrl-btn" data-layer="topo">TOPO</button>
+      <button class="ctrl-btn" data-layer="terrain">TERR</button>
+      <button class="ctrl-btn" data-layer="dark">DARK</button>
+      <button class="ctrl-btn" data-layer="light">LIGHT</button>
+    </div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">PITCH <span class="val" id="pitch-val">0°</span></span>
+      <input type="range" class="ctrl-range" id="pitch-range" min="0" max="85" value="0" />
+      <span class="ctrl-label">BRG <span class="val" id="bearing-val">90°</span></span>
+      <input type="range" class="ctrl-range" id="bearing-range" min="-180" max="180" value="90" />
+      <button class="ctrl-btn" id="btn-reset-view">RESET</button>
+      <button class="ctrl-btn" id="btn-fit-chile">FIT CL</button>
+    </div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">ZOOM <span class="val" id="zoom-val">5.0</span></span>
+      <button class="ctrl-btn" id="btn-zoom-in">+</button>
+      <button class="ctrl-btn" id="btn-zoom-out">−</button>
+    </div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">TOOLS</span>
+      <button class="ctrl-btn" id="btn-measure">MEDIR</button>
+      <button class="ctrl-btn" id="btn-coords">COORD</button>
+      <button class="ctrl-btn" id="btn-terrain-3d">3D</button>
+      <button class="ctrl-btn" id="btn-labels">LBL</button>
+    </div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">SYS</span>
+      <button class="ctrl-btn" id="btn-theme">☾ DARK</button>
+      <button class="ctrl-btn" id="btn-fullscreen">⛶ FULL</button>
+    </div>
+  </div>
+
+  <!-- REGION LIST (horizontal, abajo) -->
+  <div class="region-list">
+    <div class="region-list-header">REGIONES [16]</div>
+    <div id="region-list-body"></div>
+  </div>
+
+  <!-- COMPASS -->
+  <div class="compass">
+    <div class="compass-ring" id="compass-ring">
+      <div class="compass-label n">N</div>
+      <div class="compass-label s">S</div>
+      <div class="compass-label e">E</div>
+      <div class="compass-label w">W</div>
+      <div class="compass-rose" id="compass-rose">
+        <svg viewBox="0 0 100 100">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ff2a6d"/>
+              <stop offset="100%" stop-color="#00f0ff"/>
+            </linearGradient>
+          </defs>
+          <polygon points="50,5 45,50 55,50" fill="url(#g1)" />
+          <polygon points="50,95 45,50 55,50" fill="#00f0ff" opacity="0.4" />
+          <circle cx="50" cy="50" r="3" fill="#fff" />
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEASURE READOUT -->
+  <div class="measure-readout" id="measure-readout">
+    DISTANCIA: <b id="measure-dist">0.00 km</b> | SEGMENTOS: <b id="measure-seg">0</b>
+  </div>
+
+  <!-- INFO PANEL -->
+  <div class="info-panel" id="info-panel">
+    <div class="info-header">
+      <h2 id="info-title">—</h2>
+      <button class="close-btn" id="info-close">✕</button>
+    </div>
+    <div class="info-subheader">
+      <span id="info-code">REG-XX</span>
+      <span id="info-coord">—</span>
+    </div>
+    <div class="info-body" id="info-body"></div>
+  </div>
+
+  <!-- RULERS -->
+  <div class="ruler-h" id="ruler-h">
+    <svg class="ruler-svg" id="ruler-h-svg"></svg>
+    <div class="ruler-label-global ruler-label-h">ANCHO: <span id="ruler-w">0</span> px</div>
+  </div>
+  <div class="ruler-v" id="ruler-v">
+    <svg class="ruler-svg" id="ruler-v-svg"></svg>
+    <div class="ruler-label-global ruler-label-v">ALTO: <span id="ruler-h-val">0</span> px</div>
+  </div>
+  <div class="ruler-corner" id="ruler-corner">PX</div>
+
+<script>
+/* ============================================================
+   DATOS: 16 Regiones de Chile con info detallada + ciudades
+   ============================================================ */
+const REGIONES = [
+  {
+    id: 'AP', num: 'XV', nombre: 'Arica y Parinacota', capital: 'Arica',
+    coord: [-70.3126, -18.4783],
+    superficie: 16873, poblacion: 252110, densidad: 14.9,
+    clima: 'Desértico costero / Altiplánico',
+    geografia: 'Zona más septentrional de Chile. Incluye el Altiplano andino, Parinacota (volcán 6342m), valles precordilleranos y costa pacífica.',
+    economia: 'Minería (cobre), agricultura de oasis (olivos), turismo fronterizo, puerto de Arica (transit hacia Bolivia).',
+    hitos: 'Frontera con Perú y Bolivia. Parque Nacional Lauca (sitio UNESCO). Lago Chungará.',
+    ciudades: [
+      { nombre: 'Arica', coord: [-70.3126, -18.4783], pop: 221364, tipo: 'regional-capital' },
+      { nombre: 'Putre', coord: [-69.5667, -18.1972], pop: 1235, tipo: 'city' },
+      { nombre: 'Camarones', coord: [-69.4667, -19.0067], pop: 1100, tipo: 'city' },
+      { nombre: 'General Lagos', coord: [-69.5000, -17.5667], pop: 700, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'TA', num: 'I', nombre: 'Tarapacá', capital: 'Iquique',
+    coord: [-70.1356, -20.2208],
+    superficie: 42226, poblacion: 382773, densidad: 9.1,
+    clima: 'Desértico costero / Desértico marginal de altura',
+    geografia: 'Desierto de Atacama en su sección norte. Pampa del Tamarugal, Cordillera de los Andes con volcanes sobre 5.500m.',
+    economia: 'Minería (cobre, salitre, yodo), Zofri (zona franca), pesca industrial, turismo.',
+    hitos: 'Giant de Atacama (geoglifo). Pueblo de Pica (oasis). Humberstone (ex salitrera, UNESCO).',
+    ciudades: [
+      { nombre: 'Iquique', coord: [-70.1356, -20.2208], pop: 191468, tipo: 'regional-capital' },
+      { nombre: 'Alto Hospicio', coord: [-70.1086, -20.2711], pop: 129999, tipo: 'city' },
+      { nombre: 'Pozo Almonte', coord: [-69.7856, -20.2569], pop: 15711, tipo: 'city' },
+      { nombre: 'Pica', coord: [-69.3333, -20.4925], pop: 6178, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'AN', num: 'II', nombre: 'Antofagasta', capital: 'Antofagasta',
+    coord: [-70.4000, -23.6500],
+    superficie: 126049, poblacion: 691854, densidad: 5.5,
+    clima: 'Desértico extremo',
+    geografia: 'Contiene el desierto más árido del mundo. Salar de Atacama, volcanes, cordillera de la costa abrupta.',
+    economia: 'Minería metálica (Escondida, Chuquicamata, mayor producción de cobre mundial), litio (Salar de Atacama), energía solar.',
+    hitos: 'San Pedro de Atacama, Valle de la Luna, ALMA (observatorio), La Portada de Antofagasta.',
+    ciudades: [
+      { nombre: 'Antofagasta', coord: [-70.4000, -23.6500], pop: 361873, tipo: 'regional-capital' },
+      { nombre: 'Calama', coord: [-68.9333, -22.4667], pop: 165731, tipo: 'city' },
+      { nombre: 'Tocopilla', coord: [-70.2000, -22.0931], pop: 25186, tipo: 'city' },
+      { nombre: 'Mejillones', coord: [-70.4500, -23.1000], pop: 13267, tipo: 'city' },
+      { nombre: 'Taltal', coord: [-70.4833, -25.4000], pop: 13800, tipo: 'city' },
+      { nombre: 'San Pedro de Atacama', coord: [-68.2000, -22.9167], pop: 10996, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'AT', num: 'III', nombre: 'Atacama', capital: 'Copiapó',
+    coord: [-70.3333, -27.3667],
+    superficie: 75176, poblacion: 286168, densidad: 3.8,
+    clima: 'Desértico costero / Desértico transicional',
+    geografia: 'Zona de transición entre desierto y semiárido. Ojos del Salado (volcán activo más alto del mundo, 6893m). Valles fértiles (Copiapó, Huasco).',
+    economia: 'Minería (cobre, oro, hierro), uva de mesa, oliva, pisco.',
+    hitos: 'Mina San José (rescate 2010). Desierto florido (evento climático). Parque Nacional Pan de Azúcar.',
+    ciudades: [
+      { nombre: 'Copiapó', coord: [-70.3333, -27.3667], pop: 153937, tipo: 'regional-capital' },
+      { nombre: 'Vallenar', coord: [-70.7598, -28.5756], pop: 51891, tipo: 'city' },
+      { nombre: 'Caldera', coord: [-70.8167, -27.0667], pop: 17085, tipo: 'city' },
+      { nombre: 'Chañaral', coord: [-70.6167, -26.3459], pop: 12139, tipo: 'city' },
+      { nombre: 'Diego de Almagro', coord: [-70.0500, -26.3667], pop: 9000, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'CO', num: 'IV', nombre: 'Coquimbo', capital: 'La Serena',
+    coord: [-71.2519, -29.9027],
+    superficie: 40580, poblacion: 757586, densidad: 18.7,
+    clima: 'Semiárido / Mediterráneo seco',
+    geografia: 'Valles transversales (Elqui, Limarí, Choapa). Cielos más limpios del hemisferio sur (observatorios).',
+    economia: 'Agricultura (pisco, uva, palta), minería (hierro, oro), astroturismo.',
+    hitos: 'Valle del Elqui. Observatorios (La Silla, Tololo, Las Campanas). Isla Damas (pingüinera).',
+    ciudades: [
+      { nombre: 'La Serena', coord: [-71.2519, -29.9027], pop: 221054, tipo: 'regional-capital' },
+      { nombre: 'Coquimbo', coord: [-71.3436, -29.9533], pop: 227730, tipo: 'city' },
+      { nombre: 'Ovalle', coord: [-71.2000, -30.6000], pop: 111272, tipo: 'city' },
+      { nombre: 'Illapel', coord: [-71.1667, -31.6333], pop: 33955, tipo: 'city' },
+      { nombre: 'Vicuña', coord: [-70.7167, -30.0333], pop: 27820, tipo: 'city' },
+      { nombre: 'Andacollo', coord: [-71.0833, -30.2333], pop: 11044, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'VA', num: 'V', nombre: 'Valparaíso', capital: 'Valparaíso',
+    coord: [-71.6127, -33.0472],
+    superficie: 16396, poblacion: 1960170, densidad: 119.6,
+    clima: 'Mediterráneo',
+    geografia: 'Litoral central, cordillera costera, islas oceánicas (Rapa Nui, Juan Fernández). Diversidad de ecosistemas.',
+    economia: 'Puerto principal del país, turismo, agricultura (vinos), industria, servicios.',
+    hitos: 'Valparaíso (Patrimonio UNESCO). Viña del Mar. Isla de Pascua (Rapa Nui). Congreso Nacional.',
+    ciudades: [
+      { nombre: 'Valparaíso', coord: [-71.6127, -33.0472], pop: 296655, tipo: 'regional-capital' },
+      { nombre: 'Viña del Mar', coord: [-71.5518, -33.0246], pop: 334248, tipo: 'city' },
+      { nombre: 'Quilpué', coord: [-71.4419, -33.0478], pop: 172199, tipo: 'city' },
+      { nombre: 'Villa Alemana', coord: [-71.3731, -33.0420], pop: 124538, tipo: 'city' },
+      { nombre: 'San Antonio', coord: [-71.6136, -33.5928], pop: 91251, tipo: 'city' },
+      { nombre: 'Quillota', coord: [-71.2483, -32.8822], pop: 90517, tipo: 'city' },
+      { nombre: 'Los Andes', coord: [-70.5985, -32.8344], pop: 66708, tipo: 'city' },
+      { nombre: 'San Felipe', coord: [-70.7258, -32.7500], pop: 76844, tipo: 'city' },
+      { nombre: 'Hanga Roa (Rapa Nui)', coord: [-109.4272, -27.1500], pop: 7750, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'RM', num: 'XIII', nombre: 'Metropolitana', capital: 'Santiago',
+    coord: [-70.6506, -33.4378],
+    superficie: 15403, poblacion: 8420729, densidad: 546.8,
+    clima: 'Mediterráneo continentalizado',
+    geografia: 'Depresión intermedia rodeada por Andes y Cordillera de la Costa. Valle del Maipo.',
+    economia: 'Centro financiero, industrial y de servicios del país. Concentra ~40% del PIB.',
+    hitos: 'Santiago (capital). Cerro San Cristóbal. Costanera Center. Cajón del Maipo. Centros de ski (Valle Nevado, Farellones, La Parva).',
+    ciudades: [
+      { nombre: 'Santiago', coord: [-70.6506, -33.4378], pop: 6061185, tipo: 'capital' },
+      { nombre: 'Puente Alto', coord: [-70.5757, -33.6117], pop: 645909, tipo: 'city' },
+      { nombre: 'Maipú', coord: [-70.7667, -33.5167], pop: 578605, tipo: 'city' },
+      { nombre: 'La Florida', coord: [-70.5986, -33.5522], pop: 366916, tipo: 'city' },
+      { nombre: 'San Bernardo', coord: [-70.7000, -33.5933], pop: 334396, tipo: 'city' },
+      { nombre: 'Las Condes', coord: [-70.5700, -33.4100], pop: 330759, tipo: 'city' },
+      { nombre: 'Providencia', coord: [-70.6100, -33.4300], pop: 156897, tipo: 'city' },
+      { nombre: 'Melipilla', coord: [-71.2136, -33.6875], pop: 123627, tipo: 'city' },
+      { nombre: 'Colina', coord: [-70.6744, -33.2000], pop: 146207, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'LI', num: 'VI', nombre: 'O\'Higgins', capital: 'Rancagua',
+    coord: [-70.7447, -34.1708],
+    superficie: 16387, poblacion: 914555, densidad: 55.8,
+    clima: 'Mediterráneo',
+    geografia: 'Valle central fértil. Cordillera con El Teniente (mina subterránea de cobre más grande del mundo).',
+    economia: 'Agricultura (uva, frutales, vino), minería (El Teniente), agroindustria.',
+    hitos: 'Mina El Teniente. Sewell (campamento minero UNESCO). Vinos de Colchagua.',
+    ciudades: [
+      { nombre: 'Rancagua', coord: [-70.7447, -34.1708], pop: 251176, tipo: 'regional-capital' },
+      { nombre: 'San Fernando', coord: [-70.9833, -34.5833], pop: 76429, tipo: 'city' },
+      { nombre: 'Rengo', coord: [-70.8667, -34.4000], pop: 58286, tipo: 'city' },
+      { nombre: 'Machalí', coord: [-70.6500, -34.1833], pop: 60440, tipo: 'city' },
+      { nombre: 'Santa Cruz', coord: [-71.3667, -34.6333], pop: 44836, tipo: 'city' },
+      { nombre: 'Pichilemu', coord: [-72.0083, -34.3906], pop: 16875, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'ML', num: 'VII', nombre: 'Maule', capital: 'Talca',
+    coord: [-71.6636, -35.4264],
+    superficie: 30296, poblacion: 1131939, densidad: 37.4,
+    clima: 'Mediterráneo',
+    geografia: 'Valle central agrícola. Ríos Maule y Mataquito. Reserva Nacional Radal Siete Tazas.',
+    economia: 'Agricultura (vino, frutas, cereales), forestal, hidroeléctricas.',
+    hitos: 'Valle de vinos del Maule. Constitución (surf). Radal Siete Tazas. Laguna del Maule.',
+    ciudades: [
+      { nombre: 'Talca', coord: [-71.6636, -35.4264], pop: 220357, tipo: 'regional-capital' },
+      { nombre: 'Curicó', coord: [-71.2394, -34.9828], pop: 149136, tipo: 'city' },
+      { nombre: 'Linares', coord: [-71.5911, -35.8461], pop: 93174, tipo: 'city' },
+      { nombre: 'Constitución', coord: [-72.4000, -35.3333], pop: 48037, tipo: 'city' },
+      { nombre: 'Cauquenes', coord: [-72.3217, -35.9683], pop: 41217, tipo: 'city' },
+      { nombre: 'Molina', coord: [-71.2833, -35.1167], pop: 44359, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'NB', num: 'XVI', nombre: 'Ñuble', capital: 'Chillán',
+    coord: [-72.1034, -36.6066],
+    superficie: 13178, poblacion: 511551, densidad: 38.8,
+    clima: 'Mediterráneo con influencia lluviosa',
+    geografia: 'Cordillera andina con volcán Nevados de Chillán. Valle central agrícola. Costa (Cobquecura).',
+    economia: 'Agricultura (vinos, frutales), turismo termal, ganadería, forestal.',
+    hitos: 'Termas y centro de ski Nevados de Chillán. Cobquecura (lobos marinos). Mercado de Chillán. Cuna de Bernardo O\'Higgins.',
+    ciudades: [
+      { nombre: 'Chillán', coord: [-72.1034, -36.6066], pop: 184739, tipo: 'regional-capital' },
+      { nombre: 'Chillán Viejo', coord: [-72.1242, -36.6253], pop: 30907, tipo: 'city' },
+      { nombre: 'San Carlos', coord: [-71.9600, -36.4200], pop: 53024, tipo: 'city' },
+      { nombre: 'Bulnes', coord: [-72.2967, -36.7417], pop: 21556, tipo: 'city' },
+      { nombre: 'Quirihue', coord: [-72.5419, -36.2803], pop: 11514, tipo: 'city' },
+      { nombre: 'Coelemu', coord: [-72.7000, -36.4833], pop: 16082, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'BI', num: 'VIII', nombre: 'Biobío', capital: 'Concepción',
+    coord: [-73.0498, -36.8270],
+    superficie: 23890, poblacion: 1663696, densidad: 69.7,
+    clima: 'Mediterráneo lluvioso / Templado',
+    geografia: 'Costa, valle central y cordillera. Río Biobío (principal frontera natural histórica).',
+    economia: 'Industria (acero Huachipato), forestal (celulosa), pesca, universidades, puerto.',
+    hitos: 'Gran Concepción (conurbación). Lota (minería histórica). Salto del Laja. Universidad de Concepción.',
+    ciudades: [
+      { nombre: 'Concepción', coord: [-73.0498, -36.8270], pop: 223574, tipo: 'regional-capital' },
+      { nombre: 'Talcahuano', coord: [-73.1167, -36.7167], pop: 151749, tipo: 'city' },
+      { nombre: 'Los Ángeles', coord: [-72.3500, -37.4667], pop: 202331, tipo: 'city' },
+      { nombre: 'Chiguayante', coord: [-73.0267, -36.9197], pop: 94599, tipo: 'city' },
+      { nombre: 'San Pedro de la Paz', coord: [-73.1000, -36.8467], pop: 145715, tipo: 'city' },
+      { nombre: 'Coronel', coord: [-73.1653, -37.0250], pop: 116262, tipo: 'city' },
+      { nombre: 'Lota', coord: [-73.1519, -37.0894], pop: 43561, tipo: 'city' },
+      { nombre: 'Hualpén', coord: [-73.1500, -36.7833], pop: 96749, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'AR', num: 'IX', nombre: 'La Araucanía', capital: 'Temuco',
+    coord: [-72.5986, -38.7359],
+    superficie: 31842, poblacion: 1007074, densidad: 31.6,
+    clima: 'Templado lluvioso',
+    geografia: 'Lagos y volcanes andinos (Villarrica, Llaima). Bosques nativos (Araucaria). Territorio mapuche ancestral.',
+    economia: 'Agricultura, forestal, turismo (lagos, parques), ganadería.',
+    hitos: 'Volcán Villarrica. Parque Nacional Conguillío. Villarrica y Pucón. Cultura mapuche.',
+    ciudades: [
+      { nombre: 'Temuco', coord: [-72.5986, -38.7359], pop: 282415, tipo: 'regional-capital' },
+      { nombre: 'Padre Las Casas', coord: [-72.5989, -38.7664], pop: 76126, tipo: 'city' },
+      { nombre: 'Villarrica', coord: [-72.2284, -39.2833], pop: 55478, tipo: 'city' },
+      { nombre: 'Pucón', coord: [-71.9500, -39.2700], pop: 28523, tipo: 'city' },
+      { nombre: 'Angol', coord: [-72.7061, -37.7956], pop: 53963, tipo: 'city' },
+      { nombre: 'Victoria', coord: [-72.3281, -38.2322], pop: 34277, tipo: 'city' },
+      { nombre: 'Lautaro', coord: [-72.4361, -38.5258], pop: 39415, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'LR', num: 'XIV', nombre: 'Los Ríos', capital: 'Valdivia',
+    coord: [-73.2459, -39.8142],
+    superficie: 18430, poblacion: 399769, densidad: 21.7,
+    clima: 'Templado lluvioso',
+    geografia: 'Sistema hídrico complejo (ríos Calle-Calle, Valdivia, Cruces). Selva valdiviana. Lagos Ranco y Panguipulli.',
+    economia: 'Forestal, agrícola, turismo (termas, ríos), cervecería Kunstmann, pesca de río.',
+    hitos: 'Valdivia (ciudad fluvial). Forts Niebla y Corral. Selva Valdiviana. Lago Ranco.',
+    ciudades: [
+      { nombre: 'Valdivia', coord: [-73.2459, -39.8142], pop: 166080, tipo: 'regional-capital' },
+      { nombre: 'La Unión', coord: [-73.0844, -40.2919], pop: 39447, tipo: 'city' },
+      { nombre: 'Río Bueno', coord: [-72.9600, -40.3300], pop: 32627, tipo: 'city' },
+      { nombre: 'Panguipulli', coord: [-72.3333, -39.6431], pop: 34223, tipo: 'city' },
+      { nombre: 'Paillaco', coord: [-72.8667, -40.0667], pop: 21398, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'LL', num: 'X', nombre: 'Los Lagos', capital: 'Puerto Montt',
+    coord: [-72.9450, -41.4717],
+    superficie: 48584, poblacion: 892361, densidad: 18.4,
+    clima: 'Templado oceánico lluvioso',
+    geografia: 'Distrito de Lagos. Archipiélago de Chiloé. Volcán Osorno, Calbuco. Senos, fiordos, inicio Patagonia.',
+    economia: 'Salmonicultura (1ra potencia mundial), turismo, ganadería, forestal, agroindustria.',
+    hitos: 'Chiloé (iglesias UNESCO). Volcán Osorno. Puerto Varas. Lago Llanquihue. Angelmó.',
+    ciudades: [
+      { nombre: 'Puerto Montt', coord: [-72.9450, -41.4717], pop: 245902, tipo: 'regional-capital' },
+      { nombre: 'Osorno', coord: [-73.1300, -40.5686], pop: 161460, tipo: 'city' },
+      { nombre: 'Castro', coord: [-73.7667, -42.4833], pop: 43916, tipo: 'city' },
+      { nombre: 'Ancud', coord: [-73.8203, -41.8717], pop: 38991, tipo: 'city' },
+      { nombre: 'Puerto Varas', coord: [-72.9833, -41.3167], pop: 45403, tipo: 'city' },
+      { nombre: 'Calbuco', coord: [-73.1311, -41.7722], pop: 33985, tipo: 'city' },
+      { nombre: 'Quellón', coord: [-73.6167, -43.1167], pop: 28180, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'AI', num: 'XI', nombre: 'Aysén', capital: 'Coyhaique',
+    coord: [-72.0695, -45.5752],
+    superficie: 108494, poblacion: 107297, densidad: 0.99,
+    clima: 'Templado frío lluvioso / Estepa fría',
+    geografia: 'Patagonia Norte. Campos de Hielo Norte. Fiordos, ríos prístinos (Baker, Futaleufú), lagos (General Carrera).',
+    economia: 'Ganadería, pesca, acuicultura, turismo aventura.',
+    hitos: 'Carretera Austral. Capillas de Mármol. Parque Nacional Patagonia. Río Baker (mayor caudal de Chile).',
+    ciudades: [
+      { nombre: 'Coyhaique', coord: [-72.0695, -45.5752], pop: 57818, tipo: 'regional-capital' },
+      { nombre: 'Puerto Aysén', coord: [-72.7000, -45.4000], pop: 18406, tipo: 'city' },
+      { nombre: 'Chile Chico', coord: [-71.7253, -46.5375], pop: 4790, tipo: 'city' },
+      { nombre: 'Cochrane', coord: [-72.5689, -47.2539], pop: 3557, tipo: 'city' },
+      { nombre: 'Puerto Cisnes', coord: [-72.6961, -44.7442], pop: 3064, tipo: 'city' }
+    ]
+  },
+  {
+    id: 'MA', num: 'XII', nombre: 'Magallanes y Antártica Chilena', capital: 'Punta Arenas',
+    coord: [-70.9127, -53.1638],
+    superficie: 1382291, poblacion: 166533, densidad: 0.12,
+    clima: 'Tundra / Estepa fría / Polar (Antártica)',
+    geografia: 'Región más austral. Estrecho de Magallanes, Torres del Paine, Tierra del Fuego, Antártica chilena (Territorio reclamado).',
+    economia: 'Ganadería ovina, petróleo y gas, pesca, turismo (Paine), ciencia antártica.',
+    hitos: 'Torres del Paine (PN). Estrecho de Magallanes. Cabo de Hornos. Base Frei (Antártica). Puerto Williams (ciudad más austral).',
+    ciudades: [
+      { nombre: 'Punta Arenas', coord: [-70.9127, -53.1638], pop: 131592, tipo: 'regional-capital' },
+      { nombre: 'Puerto Natales', coord: [-72.5050, -51.7236], pop: 20987, tipo: 'city' },
+      { nombre: 'Porvenir', coord: [-70.3717, -53.2958], pop: 5907, tipo: 'city' },
+      { nombre: 'Puerto Williams', coord: [-67.6161, -54.9333], pop: 2874, tipo: 'city' },
+      { nombre: 'Base Frei (Antártica)', coord: [-58.9833, -62.2000], pop: 80, tipo: 'city' }
+    ]
+  }
+];
+
+/* ============================================================
+   ESTILOS DE MAPA (MapLibre)
+   ============================================================ */
+const STYLES = {
+  sat: {
+    version: 8,
+    sources: {
+      sat: {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: '© Esri · World Imagery'
+      },
+      labels: {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256
+      }
+    },
+    layers: [
+      { id: 'sat', type: 'raster', source: 'sat' },
+      { id: 'lbl', type: 'raster', source: 'labels', paint: { 'raster-opacity': 0.8 } }
+    ]
+  },
+  topo: {
+    version: 8,
+    sources: {
+      topo: {
+        type: 'raster',
+        tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png','https://b.tile.opentopomap.org/{z}/{x}/{y}.png','https://c.tile.opentopomap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© OpenTopoMap (CC-BY-SA)'
+      }
+    },
+    layers: [{ id: 'topo', type: 'raster', source: 'topo' }]
+  },
+  dark: {
+    version: 8,
+    sources: {
+      dark: {
+        type: 'raster',
+        tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png','https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png','https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'],
+        tileSize: 256,
+        attribution: '© CARTO · © OpenStreetMap'
+      }
+    },
+    layers: [{ id: 'dark', type: 'raster', source: 'dark' }]
+  },
+  light: {
+    version: 8,
+    sources: {
+      light: {
+        type: 'raster',
+        tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png','https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png','https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png'],
+        tileSize: 256,
+        attribution: '© CARTO · © OpenStreetMap'
+      }
+    },
+    layers: [{ id: 'light', type: 'raster', source: 'light' }]
+  },
+  terrain: {
+    version: 8,
+    sources: {
+      terrain: {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: '© Esri · World Terrain'
+      },
+      labels: {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256
+      }
+    },
+    layers: [
+      { id: 'terrain', type: 'raster', source: 'terrain' },
+      { id: 'lbl', type: 'raster', source: 'labels', paint: { 'raster-opacity': 0.8 } }
+    ]
+  }
+};
+
+/* ============================================================
+   INICIALIZACIÓN DEL MAPA
+   ============================================================ */
+// Chile es naturalmente un país largo N-S. En pantalla ultra-wide
+// lo orientamos con bearing=90° → Norte (Arica) a la IZQUIERDA,
+// Sur (Magallanes) a la DERECHA. Igual que los mapas IGM horizontales.
+const HORIZONTAL_BEARING = 90;
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: STYLES.sat,
+  center: [-71.5, -38.5],   // centro de Chile
+  zoom: 4.2,
+  pitch: 0,
+  bearing: HORIZONTAL_BEARING,
+  attributionControl: { compact: true },
+  antialias: true
+});
+
+map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-right');
+
+/* ============================================================
+   MARCADORES Y LÍMITES DE REGIÓN
+   ============================================================ */
+const markerStore = [];
+let regionGeoJSON = null;
+
+function buildMarkers() {
+  markerStore.forEach(m => m.remove());
+  markerStore.length = 0;
+
+  REGIONES.forEach(reg => {
+    reg.ciudades.forEach(ciudad => {
+      const el = document.createElement('div');
+      el.className = 'city-marker ' + (ciudad.tipo === 'capital' ? 'capital' : (ciudad.tipo === 'regional-capital' ? 'regional-capital' : ''));
+      el.setAttribute('data-name', ciudad.nombre);
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showCityInfo(reg, ciudad);
+      });
+      const m = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat(ciudad.coord)
+        .addTo(map);
+      markerStore.push(m);
+    });
+  });
+}
+
+/* Contorno detallado de Chile continental + Tierra del Fuego (fallback local, ~180 puntos) */
+const CHILE_OUTLINE = [
+  // === Costa pacífica de norte a sur ===
+  [-70.31,-18.35],[-70.31,-18.48],[-70.22,-18.80],[-70.18,-19.12],[-70.16,-19.48],
+  [-70.14,-19.80],[-70.14,-20.22],[-70.18,-20.55],[-70.18,-20.92],[-70.19,-21.30],
+  [-70.17,-21.65],[-70.13,-21.95],[-70.20,-22.09],[-70.29,-22.40],[-70.40,-22.75],
+  [-70.44,-23.15],[-70.40,-23.65],[-70.47,-24.00],[-70.52,-24.35],[-70.55,-24.75],
+  [-70.52,-25.10],[-70.48,-25.40],[-70.60,-25.80],[-70.70,-26.20],[-70.72,-26.60],
+  [-70.78,-26.95],[-70.82,-27.07],[-70.84,-27.45],[-70.86,-27.85],[-70.83,-28.25],
+  [-70.80,-28.57],[-70.96,-28.80],[-71.10,-29.05],[-71.20,-29.10],[-71.28,-29.40],
+  [-71.34,-29.65],[-71.34,-29.95],[-71.40,-30.25],[-71.49,-30.60],[-71.54,-30.95],
+  [-71.58,-31.25],[-71.62,-31.55],[-71.58,-31.90],[-71.55,-32.15],[-71.57,-32.45],
+  [-71.61,-32.75],[-71.61,-33.05],[-71.58,-33.30],[-71.60,-33.45],[-71.61,-33.59],
+  [-71.70,-33.85],[-71.80,-34.10],[-71.80,-34.25],[-71.95,-34.30],[-72.01,-34.39],
+  [-72.10,-34.55],[-72.18,-34.75],[-72.28,-35.00],[-72.40,-35.33],[-72.50,-35.65],
+  [-72.60,-35.97],[-72.70,-36.15],[-72.78,-36.28],[-72.90,-36.50],[-73.00,-36.65],
+  [-73.05,-36.83],[-73.15,-37.00],[-73.17,-37.23],[-73.30,-37.35],[-73.50,-37.50],
+  [-73.60,-37.65],[-73.67,-37.80],[-73.55,-38.05],[-73.45,-38.30],[-73.42,-38.55],
+  [-73.40,-38.78],[-73.32,-39.05],[-73.25,-39.38],[-73.22,-39.60],[-73.25,-39.81],
+  [-73.32,-40.05],[-73.47,-40.27],[-73.60,-40.55],[-73.70,-40.78],[-73.77,-40.95],
+  [-73.80,-41.18],[-73.45,-41.32],[-73.15,-41.40],[-72.95,-41.47],[-73.00,-41.65],
+  [-73.10,-41.78],[-73.35,-41.82],[-73.55,-41.85],[-73.80,-41.85],[-74.00,-42.15],
+  [-74.10,-42.50],[-74.20,-43.00],[-74.30,-43.35],[-74.35,-43.72],[-74.25,-43.90],
+  [-74.10,-44.10],[-74.25,-44.40],[-74.48,-44.72],[-74.60,-45.10],[-74.72,-45.50],
+  [-74.90,-45.95],[-75.20,-46.35],[-75.50,-46.80],[-75.40,-47.20],[-75.35,-47.55],
+  [-75.25,-48.00],[-75.00,-48.40],[-74.60,-48.75],[-74.35,-48.95],[-74.10,-49.10],
+  [-74.15,-49.50],[-74.22,-49.80],[-74.30,-50.10],[-74.00,-50.35],[-73.70,-50.55],
+  [-73.50,-50.75],[-73.10,-51.05],[-72.80,-51.35],[-72.55,-51.75],[-72.10,-52.10],
+  [-71.55,-52.40],[-71.00,-52.60],[-70.60,-52.75],[-70.40,-52.80],[-70.15,-52.70],
+  [-69.95,-52.50],[-69.75,-52.45],[-69.50,-52.50],[-69.20,-52.65],[-68.80,-52.65],
+  [-68.60,-52.65],
+  // === Tierra del Fuego – Cabo de Hornos ===
+  [-68.60,-53.00],[-68.60,-53.40],[-68.60,-53.80],[-68.60,-54.20],[-68.60,-54.60],
+  [-68.60,-54.90],[-68.00,-55.15],[-67.50,-55.50],[-67.28,-55.98],[-66.80,-55.75],
+  [-66.45,-55.40],[-66.45,-55.00],[-67.00,-54.85],[-67.50,-54.75],[-68.20,-54.70],
+  [-68.60,-54.60],
+  // === Regreso: borde andino de sur a norte ===
+  [-69.00,-52.50],[-69.75,-52.25],[-70.40,-52.10],[-71.15,-51.70],[-71.90,-51.30],
+  [-72.50,-50.80],[-73.00,-50.30],[-72.90,-49.80],[-72.80,-49.30],[-72.95,-48.75],
+  [-73.10,-48.20],[-73.20,-47.65],[-73.25,-47.00],[-72.85,-46.40],[-72.40,-45.90],
+  [-72.00,-45.45],[-71.70,-45.00],[-71.65,-44.50],[-71.60,-44.00],[-71.70,-43.50],
+  [-71.80,-43.00],[-71.75,-42.55],[-71.70,-42.10],[-71.75,-41.70],[-71.80,-41.30],
+  [-71.85,-40.80],[-71.95,-40.30],[-71.90,-39.95],[-71.80,-39.60],[-71.65,-39.20],
+  [-71.50,-38.85],[-71.40,-38.60],[-71.25,-38.30],[-71.10,-38.05],[-71.00,-37.80],
+  [-71.05,-37.40],[-71.15,-36.80],[-70.95,-36.45],[-70.70,-36.10],[-70.55,-35.70],
+  [-70.50,-35.30],[-70.40,-34.90],[-70.30,-34.50],[-70.15,-34.10],[-70.00,-33.70],
+  [-69.80,-33.30],[-69.85,-32.80],[-69.95,-32.40],[-70.00,-32.00],[-70.20,-31.55],
+  [-70.40,-31.15],[-70.40,-30.75],[-70.30,-30.35],[-70.10,-29.80],[-69.90,-29.30],
+  [-69.85,-28.90],[-69.80,-28.50],[-69.50,-28.10],[-69.00,-27.75],[-68.78,-27.45],
+  [-68.55,-27.11],[-68.52,-26.60],[-68.50,-26.10],[-68.35,-25.65],[-68.20,-25.20],
+  [-68.25,-24.65],[-68.30,-24.10],[-68.10,-23.55],[-67.90,-23.00],[-67.70,-22.65],
+  [-67.50,-22.30],[-67.75,-21.75],[-68.00,-21.20],[-68.25,-20.85],[-68.50,-20.50],
+  [-68.55,-20.15],[-68.60,-19.80],[-68.80,-19.40],[-69.00,-19.00],[-69.25,-18.60],
+  [-69.50,-18.20],[-69.75,-18.05],[-70.00,-18.00],[-70.20,-18.10],[-70.31,-18.35]
+];
+
+/* Cargar GeoJSON externo de regiones (best-effort). Si falla, construye fallback con contorno país */
+async function loadRegionGeoJSON() {
+  const sources = [
+    'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector/geojson/ne_10m_admin_1_states_provinces.geojson'
+  ];
+  for (const url of sources) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      // Filtrar solo regiones de Chile
+      const filtered = {
+        type: 'FeatureCollection',
+        features: data.features.filter(f => (f.properties?.adm0_a3 || f.properties?.ADM0_A3) === 'CHL')
+      };
+      if (filtered.features.length > 0) {
+        regionGeoJSON = filtered;
+        return filtered;
+      }
+    } catch (e) { /* try next */ }
+  }
+  // Fallback: solo contorno país como una sola "región"
+  regionGeoJSON = {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: { name: 'Chile' },
+      geometry: { type: 'Polygon', coordinates: [CHILE_OUTLINE] }
+    }]
+  };
+  return regionGeoJSON;
+}
+
+function addRegionLayer() {
+  if (!regionGeoJSON || map.getSource('regiones')) return;
+  map.addSource('regiones', { type: 'geojson', data: regionGeoJSON });
+  // Relleno invisible para capturar clicks/hover sobre el área de Chile,
+  // pero sin contorno celeste visible.
+  map.addLayer({
+    id: 'regiones-fill',
+    type: 'fill',
+    source: 'regiones',
+    paint: {
+      'fill-color': '#00f0ff',
+      'fill-opacity': 0
+    }
+  });
+}
+
+/* ============================================================
+   PANEL DE INFO
+   ============================================================ */
+const infoPanel = document.getElementById('info-panel');
+const infoTitle = document.getElementById('info-title');
+const infoCode = document.getElementById('info-code');
+const infoCoord = document.getElementById('info-coord');
+const infoBody = document.getElementById('info-body');
+
+function fmtNum(n) { return n.toLocaleString('es-CL'); }
+function fmtCoord([lng, lat]) {
+  return `${Math.abs(lat).toFixed(4)}°${lat<0?'S':'N'} / ${Math.abs(lng).toFixed(4)}°${lng<0?'W':'E'}`;
+}
+
+function showRegionInfo(reg) {
+  infoTitle.textContent = reg.nombre;
+  infoCode.textContent = `REG-${reg.num} · ${reg.id}`;
+  infoCoord.textContent = fmtCoord(reg.coord);
+
+  infoBody.innerHTML = `
+    <div class="info-row"><span class="label">Capital</span><span class="value"><b>${reg.capital}</b></span></div>
+    <div class="info-row"><span class="label">Superficie</span><span class="value">${fmtNum(reg.superficie)} km²</span></div>
+    <div class="info-row"><span class="label">Población</span><span class="value">${fmtNum(reg.poblacion)} hab.</span></div>
+    <div class="info-row"><span class="label">Densidad</span><span class="value">${reg.densidad} hab/km²</span></div>
+    <div class="info-row"><span class="label">Clima</span><span class="value">${reg.clima}</span></div>
+
+    <div class="info-section-title">▸ Geografía</div>
+    <div class="info-desc">${reg.geografia}</div>
+
+    <div class="info-section-title">▸ Economía</div>
+    <div class="info-desc">${reg.economia}</div>
+
+    <div class="info-section-title">▸ Hitos</div>
+    <div class="info-desc">${reg.hitos}</div>
+
+    <div class="info-section-title">▸ Ciudades [${reg.ciudades.length}]</div>
+    <div class="info-cities">
+      ${reg.ciudades.map(c => `<div>${c.nombre} <span style="color:var(--hud-text-dim); font-size:10px;">(${fmtNum(c.pop)})</span></div>`).join('')}
+    </div>
+  `;
+  infoPanel.classList.add('visible');
+  map.flyTo({ center: reg.coord, zoom: 6.5, duration: 1400, pitch: map.getPitch() });
+}
+
+function showCityInfo(reg, ciudad) {
+  infoTitle.textContent = ciudad.nombre;
+  infoCode.textContent = `CIUDAD · ${reg.id}-${ciudad.nombre.substring(0,3).toUpperCase()}`;
+  infoCoord.textContent = fmtCoord(ciudad.coord);
+
+  const tipoLabel = ciudad.tipo === 'capital' ? 'Capital Nacional' : (ciudad.tipo === 'regional-capital' ? 'Capital Regional' : 'Ciudad');
+
+  infoBody.innerHTML = `
+    <div class="info-row"><span class="label">Clasificación</span><span class="value"><b>${tipoLabel}</b></span></div>
+    <div class="info-row"><span class="label">Región</span><span class="value">${reg.nombre} (${reg.num})</span></div>
+    <div class="info-row"><span class="label">Población</span><span class="value">${fmtNum(ciudad.pop)} hab.</span></div>
+    <div class="info-row"><span class="label">Coord.</span><span class="value">${fmtCoord(ciudad.coord)}</span></div>
+
+    <div class="info-section-title">▸ Contexto Regional</div>
+    <div class="info-desc">${reg.geografia}</div>
+
+    <div class="info-section-title">▸ Economía Regional</div>
+    <div class="info-desc">${reg.economia}</div>
+  `;
+  infoPanel.classList.add('visible');
+  map.flyTo({ center: ciudad.coord, zoom: 11, duration: 1400, pitch: map.getPitch() });
+}
+
+document.getElementById('info-close').addEventListener('click', () => {
+  infoPanel.classList.remove('visible');
+});
+
+/* Lista de regiones */
+const listBody = document.getElementById('region-list-body');
+REGIONES.forEach(reg => {
+  const el = document.createElement('div');
+  el.className = 'region-item';
+  el.innerHTML = `<span class="num">${reg.num}</span>${reg.nombre}`;
+  el.addEventListener('click', () => showRegionInfo(reg));
+  listBody.appendChild(el);
+});
+
+/* ============================================================
+   HUD: actualización permanente
+   ============================================================ */
+const metaLat = document.getElementById('meta-lat');
+const metaLon = document.getElementById('meta-lon');
+const metaZoom = document.getElementById('meta-zoom');
+const metaBrg = document.getElementById('meta-brg');
+const metaPitch = document.getElementById('meta-pitch');
+const zoomVal = document.getElementById('zoom-val');
+const pitchVal = document.getElementById('pitch-val');
+const bearingVal = document.getElementById('bearing-val');
+const compassRose = document.getElementById('compass-rose');
+const compassRing = document.getElementById('compass-ring');
+const pitchRange = document.getElementById('pitch-range');
+const bearingRange = document.getElementById('bearing-range');
+
+function updateHUD() {
+  const c = map.getCenter();
+  metaLat.textContent = c.lat.toFixed(4);
+  metaLon.textContent = c.lng.toFixed(4);
+  metaZoom.textContent = map.getZoom().toFixed(2);
+  metaBrg.textContent = Math.round(((-map.getBearing()) % 360 + 360) % 360).toString().padStart(3,'0') + '°';
+  metaPitch.textContent = Math.round(map.getPitch()).toString().padStart(2,'0') + '°';
+  zoomVal.textContent = map.getZoom().toFixed(1);
+  pitchVal.textContent = Math.round(map.getPitch()) + '°';
+  bearingVal.textContent = Math.round(map.getBearing()) + '°';
+  // Rotamos el anillo completo (labels + rosa) para que N/S/E/W coincidan con el norte real.
+  compassRing.style.transform = `rotate(${-map.getBearing()}deg)`;
+  pitchRange.value = map.getPitch();
+  bearingRange.value = map.getBearing();
+}
+map.on('move', updateHUD);
+map.on('zoom', updateHUD);
+
+/* UTC + Local clock */
+function tickClock() {
+  const now = new Date();
+  document.getElementById('meta-utc').textContent = now.toISOString().substr(11,8);
+  document.getElementById('meta-local').textContent = now.toLocaleTimeString('es-CL', { hour12: false });
+}
+setInterval(tickClock, 1000); tickClock();
+
+/* ============================================================
+   CONTROLES
+   ============================================================ */
+let currentLayer = 'sat';
+document.querySelectorAll('[data-layer]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-layer]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentLayer = btn.dataset.layer;
+    document.body.dataset.layerMode = currentLayer;
+    map.setStyle(STYLES[currentLayer]);
+    map.once('styledata', () => {
+      addRegionLayer();
+      buildMarkers();
+    });
+  });
+});
+
+pitchRange.addEventListener('input', e => map.setPitch(+e.target.value));
+bearingRange.addEventListener('input', e => map.setBearing(+e.target.value));
+
+document.getElementById('btn-reset-view').addEventListener('click', () => {
+  map.easeTo({ pitch: 0, bearing: HORIZONTAL_BEARING, duration: 600 });
+});
+
+function fitChileHorizontal() {
+  // Encuadra Chile de extremo a extremo: Arica (N = -17.5°) hasta Cabo de Hornos (S = -56°).
+  // Con bearing=90° el eje N-S queda HORIZONTAL, así que MapLibre lo encaja en el ancho.
+  // Uso fitBounds — respeta la rotación del mapa y calcula el zoom ideal automáticamente.
+  // bbox: [[westLng, southLat], [eastLng, northLat]]
+  const chileBounds = [[-76, -56.2], [-66.5, -17.45]];
+  map.fitBounds(chileBounds, {
+    bearing: HORIZONTAL_BEARING,
+    pitch: 0,
+    padding: { top: 20, bottom: 40, left: 40, right: 40 },
+    duration: 1200,
+    linear: false
+  });
+}
+document.getElementById('btn-fit-chile').addEventListener('click', fitChileHorizontal);
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => map.zoomIn());
+document.getElementById('btn-zoom-out').addEventListener('click', () => map.zoomOut());
+
+/* MEDICIÓN */
+let measureActive = false;
+let measurePoints = [];
+const measureReadout = document.getElementById('measure-readout');
+const measureDist = document.getElementById('measure-dist');
+const measureSeg = document.getElementById('measure-seg');
+
+function haversine(a, b) {
+  const R = 6371;
+  const dLat = (b[1]-a[1]) * Math.PI/180;
+  const dLon = (b[0]-a[0]) * Math.PI/180;
+  const la1 = a[1] * Math.PI/180, la2 = b[1] * Math.PI/180;
+  const s = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+function updateMeasureLayer() {
+  const src = map.getSource('measure-line');
+  const feature = {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: measurePoints }
+  };
+  if (src) src.setData(feature);
+  else {
+    map.addSource('measure-line', { type: 'geojson', data: feature });
+    map.addLayer({
+      id: 'measure-line-l', type: 'line', source: 'measure-line',
+      paint: {
+        'line-color': '#ff9d00',
+        'line-width': 2.5,
+        'line-dasharray': [3,1.5]
+      }
+    });
+  }
+  const ptsSrc = map.getSource('measure-pts');
+  const ptsFeature = {
+    type: 'FeatureCollection',
+    features: measurePoints.map(p => ({ type:'Feature', geometry:{ type:'Point', coordinates:p }}))
+  };
+  if (ptsSrc) ptsSrc.setData(ptsFeature);
+  else {
+    map.addSource('measure-pts', { type: 'geojson', data: ptsFeature });
+    map.addLayer({
+      id: 'measure-pts-l', type: 'circle', source: 'measure-pts',
+      paint: {
+        'circle-radius': 5,
+        'circle-color': '#ff9d00',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#fff'
+      }
+    });
+  }
+
+  let total = 0;
+  for (let i=1; i<measurePoints.length; i++) total += haversine(measurePoints[i-1], measurePoints[i]);
+  measureDist.textContent = total < 1 ? (total*1000).toFixed(0) + ' m' : total.toFixed(2) + ' km';
+  measureSeg.textContent = Math.max(0, measurePoints.length - 1);
+}
+
+document.getElementById('btn-measure').addEventListener('click', (e) => {
+  measureActive = !measureActive;
+  e.target.classList.toggle('active', measureActive);
+  measureReadout.classList.toggle('visible', measureActive);
+  if (!measureActive) {
+    measurePoints = [];
+    if (map.getLayer('measure-line-l')) map.removeLayer('measure-line-l');
+    if (map.getLayer('measure-pts-l')) map.removeLayer('measure-pts-l');
+    if (map.getSource('measure-line')) map.removeSource('measure-line');
+    if (map.getSource('measure-pts')) map.removeSource('measure-pts');
+    measureDist.textContent = '0.00 km';
+    measureSeg.textContent = '0';
+    document.getElementById('map').style.cursor = '';
+  } else {
+    document.getElementById('map').style.cursor = 'crosshair';
+  }
+});
+
+map.on('click', (e) => {
+  if (measureActive) {
+    measurePoints.push([e.lngLat.lng, e.lngLat.lat]);
+    updateMeasureLayer();
+  }
+});
+map.on('dblclick', (e) => {
+  if (measureActive) { e.preventDefault(); }
+});
+
+/* Botón COORDENADAS = copia al portapapeles las del centro */
+document.getElementById('btn-coords').addEventListener('click', () => {
+  const c = map.getCenter();
+  const txt = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
+  navigator.clipboard?.writeText(txt);
+  const btn = document.getElementById('btn-coords');
+  const o = btn.textContent;
+  btn.textContent = '✓ COPY';
+  setTimeout(() => btn.textContent = o, 1200);
+});
+
+/* 3D terrain toggle (solo visual: activa terreno MapLibre) */
+let terrain3DOn = false;
+document.getElementById('btn-terrain-3d').addEventListener('click', (e) => {
+  terrain3DOn = !terrain3DOn;
+  e.target.classList.toggle('active', terrain3DOn);
+  if (terrain3DOn) {
+    if (!map.getSource('terrain-dem')) {
+      try {
+        map.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          encoding: 'terrarium',
+          maxzoom: 12
+        });
+      } catch (err) {}
+    }
+    try { map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 }); } catch(err) {}
+    map.easeTo({ pitch: 55, duration: 800 });
+  } else {
+    try { map.setTerrain(null); } catch(err) {}
+    map.easeTo({ pitch: 0, duration: 600 });
+  }
+});
+
+/* Toggle labels overlay */
+let labelsOn = true;
+document.getElementById('btn-labels').addEventListener('click', (e) => {
+  labelsOn = !labelsOn;
+  e.target.classList.toggle('active', !labelsOn);
+  markerStore.forEach(m => {
+    m.getElement().style.display = labelsOn ? '' : 'none';
+  });
+});
+
+/* Tema oscuro / claro */
+const btnTheme = document.getElementById('btn-theme');
+btnTheme.addEventListener('click', () => {
+  const current = document.body.dataset.mode;
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.body.dataset.mode = next;
+  btnTheme.textContent = next === 'dark' ? '☾ DARK' : '☀ LIGHT';
+  // Cambia automáticamente la capa a light/dark si está en esas
+  if (next === 'light' && currentLayer === 'dark') {
+    document.querySelector('[data-layer="light"]').click();
+  } else if (next === 'dark' && currentLayer === 'light') {
+    document.querySelector('[data-layer="dark"]').click();
+  }
+});
+
+/* Pantalla completa */
+document.getElementById('btn-fullscreen').addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen();
+  } else {
+    document.exitFullscreen();
+  }
+});
+
+/* ============================================================
+   REGLAS DE PIXELES (MILITAR)
+   ============================================================ */
+function drawRulers() {
+  const rulerH = document.getElementById('ruler-h-svg');
+  const rulerV = document.getElementById('ruler-v-svg');
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+
+  document.getElementById('ruler-w').textContent = W.toLocaleString('es-CL');
+  document.getElementById('ruler-h-val').textContent = H.toLocaleString('es-CL');
+
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--hud-accent').trim();
+  const dim = getComputedStyle(document.documentElement).getPropertyValue('--hud-text-dim').trim();
+
+  // --- Horizontal ---
+  const wPx = W - 30;
+  rulerH.setAttribute('viewBox', `0 0 ${wPx} 30`);
+  rulerH.setAttribute('preserveAspectRatio', 'none');
+  let hSvg = '';
+  const stepH = wPx > 3000 ? 50 : (wPx > 1600 ? 25 : 10);
+  for (let x = 0; x <= wPx; x += stepH) {
+    const isMajor = x % (stepH * 5) === 0;
+    const isMid = x % (stepH * 2) === 0;
+    const tickH = isMajor ? 14 : (isMid ? 9 : 5);
+    hSvg += `<line x1="${x}" y1="0" x2="${x}" y2="${tickH}" stroke="${accent}" stroke-width="${isMajor?1.2:0.7}" />`;
+    if (isMajor) {
+      hSvg += `<text x="${x+3}" y="24" fill="${accent}" font-family="Share Tech Mono, monospace" font-size="10">${x}</text>`;
+    }
+  }
+  // Línea base
+  hSvg += `<line x1="0" y1="0" x2="${wPx}" y2="0" stroke="${accent}" stroke-width="0.5" opacity="0.6"/>`;
+  rulerH.innerHTML = hSvg;
+
+  // --- Vertical ---
+  const hPx = H - 30;
+  rulerV.setAttribute('viewBox', `0 0 30 ${hPx}`);
+  rulerV.setAttribute('preserveAspectRatio', 'none');
+  let vSvg = '';
+  const stepV = hPx > 1200 ? 25 : 10;
+  for (let y = 0; y <= hPx; y += stepV) {
+    const isMajor = y % (stepV * 5) === 0;
+    const isMid = y % (stepV * 2) === 0;
+    const tickW = isMajor ? 14 : (isMid ? 9 : 5);
+    vSvg += `<line x1="0" y1="${y}" x2="${tickW}" y2="${y}" stroke="${accent}" stroke-width="${isMajor?1.2:0.7}" />`;
+    if (isMajor) {
+      vSvg += `<text x="16" y="${y+3}" fill="${accent}" font-family="Share Tech Mono, monospace" font-size="10">${y}</text>`;
+    }
+  }
+  vSvg += `<line x1="0" y1="0" x2="0" y2="${hPx}" stroke="${accent}" stroke-width="0.5" opacity="0.6"/>`;
+  rulerV.innerHTML = vSvg;
+}
+
+drawRulers();
+window.addEventListener('resize', () => {
+  drawRulers();
+  setTimeout(() => map.resize(), 50);
+});
+
+/* ============================================================
+   ARRANQUE
+   ============================================================ */
+map.on('load', async () => {
+  buildMarkers();
+  await loadRegionGeoJSON();
+  addRegionLayer();
+  updateHUD();
+  // Auto-encuadre horizontal de Chile al cargar
+  fitChileHorizontal();
+
+  // Click sobre región (polígono) -> abrir panel.
+  // Estrategia:
+  //   1) Si el feature tiene un nombre real (ej. GeoJSON externo de Natural Earth
+  //      con una feature por región), intentar match exacto por nombre/capital.
+  //   2) Si no (fallback: 1 polígono "Chile"), usar PROXIMIDAD del click a la
+  //      coordenada central de cada región para elegir la correcta.
+  // Nota: antes se hacía r.nombre.includes(''), que siempre era true y devolvía
+  // REGIONES[0] = Arica, dando el bug de "siempre abre Arica".
+  function pickRegionByProximity(lngLat) {
+    let best = null, bestD = Infinity;
+    for (const r of REGIONES) {
+      const [rl, ra] = r.coord;
+      // Distancia rápida (equivalente euclidiana en grados, suficiente para Chile)
+      const dx = (rl - lngLat.lng) * Math.cos(lngLat.lat * Math.PI / 180);
+      const dy = (ra - lngLat.lat);
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
+  }
+  function pickRegionByName(props) {
+    const raw = (props?.name || props?.Region || props?.region || props?.NOM_REG || props?.nombre || '')
+      .toString().trim().toLowerCase();
+    if (!raw || raw === 'chile') return null;   // nombre inútil → no forzar match
+    return REGIONES.find(r =>
+      raw.includes(r.nombre.toLowerCase()) ||
+      r.nombre.toLowerCase().includes(raw) ||
+      raw.includes(r.capital.toLowerCase())
+    ) || null;
+  }
+
+  // Usamos el click GENERAL del mapa — no el delegado al polígono regiones-fill —
+  // porque el fallback CHILE_OUTLINE tiene huecos en la Patagonia y clicks sobre
+  // Aysén/Magallanes quedaban fuera del polígono y no disparaban el handler.
+  map.on('click', (e) => {
+    if (measureActive) return;   // modo medición consume el click
+    // Intentar primero match por feature (GeoJSON externo con 16 polígonos nombrados)
+    const feats = map.queryRenderedFeatures(e.point, { layers: ['regiones-fill'] });
+    const byName = feats.length ? pickRegionByName(feats[0].properties) : null;
+    if (byName) { showRegionInfo(byName); return; }
+    // Fallback por proximidad (con tope ~600 km para ignorar clicks muy lejos)
+    const reg = pickRegionByProximity(e.lngLat);
+    if (!reg) return;
+    const dLng = (reg.coord[0] - e.lngLat.lng) * Math.cos(e.lngLat.lat * Math.PI / 180);
+    const dLat = (reg.coord[1] - e.lngLat.lat);
+    const km = Math.sqrt(dLng * dLng + dLat * dLat) * 111;
+    if (km > 600) return;
+    showRegionInfo(reg);
+  });
+  if (map.getLayer('regiones-fill')) {
+    map.on('mouseenter', 'regiones-fill', () => map.getCanvas().style.cursor = measureActive ? 'crosshair' : 'pointer');
+    map.on('mouseleave', 'regiones-fill', () => map.getCanvas().style.cursor = measureActive ? 'crosshair' : '');
+  }
+
+  // Quitar pantalla de boot
+  setTimeout(() => {
+    document.getElementById('boot').classList.add('hidden');
+    setTimeout(() => document.getElementById('boot').remove(), 700);
+  }, 1500);
+});
+
+/* Tecla ESC cierra el panel, F11 toggle fullscreen custom */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') infoPanel.classList.remove('visible');
+});
+</script>
+</body>
+</html>
