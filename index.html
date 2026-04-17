@@ -1528,7 +1528,16 @@ pitchRange.addEventListener('input', e => map.setPitch(+e.target.value));
 bearingRange.addEventListener('input', e => map.setBearing(+e.target.value));
 
 document.getElementById('btn-reset-view').addEventListener('click', () => {
-  map.easeTo({ pitch: 0, bearing: HORIZONTAL_BEARING, duration: 600 });
+  // RESET = plano completo del mundo, bearing 0° (norte arriba), pitch 0°, zoom mínimo.
+  // fitBounds con el mundo entero calcula automáticamente el zoom más bajo que entra en el canvas.
+  const WORLD_BOUNDS = [[-180, -85], [180, 85]];
+  map.fitBounds(WORLD_BOUNDS, {
+    bearing: 0,
+    pitch: 0,
+    padding: 20,
+    duration: 900,
+    linear: false
+  });
 });
 
 function fitChileHorizontal() {
