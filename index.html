@@ -1236,85 +1236,27 @@ const REGIONES = [
 ];
 
 /* ============================================================
-   ESTILOS DE MAPA (MapLibre)
+   ESTILOS DE MAPA (MapTiler Cloud)
+   ------------------------------------------------------------
+   Todos los estilos son VECTORIALES (excepto satélite, que es raster
+   de Maxar+Airbus). Ventajas vs. los rasters anteriores (Esri/CARTO/OpenTopoMap):
+     - Calidad: imágenes Maxar+Airbus superiores a Esri en zoom alto
+     - Velocidad: CDN global de MapTiler con nodo en São Paulo (~50ms desde Chile)
+     - Nitidez: los vectoriales se re-escalan en cliente sin pixelar, perfectos
+       para pantallas de alta densidad (ultra-wide, 4K, retina)
+     - Estabilidad: SLA real del free tier (100k map loads/mes)
+   Seguridad: la key está restringida por origen HTTP en el dashboard de MapTiler
+   (mapa-chile-militar-pled.netlify.app + localhost). No sirve fuera de ese dominio.
    ============================================================ */
+const MAPTILER_KEY = 'iKAVxUqb2SiHUgfjkOZ5';
+const mt = (styleId) => `https://api.maptiler.com/maps/${styleId}/style.json?key=${MAPTILER_KEY}`;
+
 const STYLES = {
-  sat: {
-    version: 8,
-    sources: {
-      sat: {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: '© Esri · World Imagery'
-      },
-      labels: {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256
-      }
-    },
-    layers: [
-      { id: 'sat', type: 'raster', source: 'sat' },
-      { id: 'lbl', type: 'raster', source: 'labels', paint: { 'raster-opacity': 0.8 } }
-    ]
-  },
-  topo: {
-    version: 8,
-    sources: {
-      topo: {
-        type: 'raster',
-        tiles: ['https://a.tile.opentopomap.org/{z}/{x}/{y}.png','https://b.tile.opentopomap.org/{z}/{x}/{y}.png','https://c.tile.opentopomap.org/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        attribution: '© OpenTopoMap (CC-BY-SA)'
-      }
-    },
-    layers: [{ id: 'topo', type: 'raster', source: 'topo' }]
-  },
-  dark: {
-    version: 8,
-    sources: {
-      dark: {
-        type: 'raster',
-        tiles: ['https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png','https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png','https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'],
-        tileSize: 256,
-        attribution: '© CARTO · © OpenStreetMap'
-      }
-    },
-    layers: [{ id: 'dark', type: 'raster', source: 'dark' }]
-  },
-  light: {
-    version: 8,
-    sources: {
-      light: {
-        type: 'raster',
-        tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png','https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png','https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png'],
-        tileSize: 256,
-        attribution: '© CARTO · © OpenStreetMap'
-      }
-    },
-    layers: [{ id: 'light', type: 'raster', source: 'light' }]
-  },
-  terrain: {
-    version: 8,
-    sources: {
-      terrain: {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: '© Esri · World Terrain'
-      },
-      labels: {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256
-      }
-    },
-    layers: [
-      { id: 'terrain', type: 'raster', source: 'terrain' },
-      { id: 'lbl', type: 'raster', source: 'labels', paint: { 'raster-opacity': 0.8 } }
-    ]
-  }
+  sat:     mt('hybrid'),        // Satélite Maxar+Airbus con labels vectoriales
+  topo:    mt('outdoor-v2'),    // Outdoor: relieve, trails, uso al aire libre
+  terrain: mt('topo-v2'),       // Topográfico: curvas de nivel, elevaciones
+  dark:    mt('dataviz-dark'),  // Oscuro minimal (reemplaza CARTO Dark)
+  light:   mt('dataviz-light')  // Claro minimal (reemplaza CARTO Light)
 };
 
 /* ============================================================
@@ -1824,12 +1766,11 @@ document.getElementById('btn-terrain-3d').addEventListener('click', (e) => {
   if (terrain3DOn) {
     if (!map.getSource('terrain-dem')) {
       try {
+        // Terreno DEM de MapTiler — codificación RGB estándar, mayor precisión y cobertura global
         map.addSource('terrain-dem', {
           type: 'raster-dem',
-          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
-          tileSize: 256,
-          encoding: 'terrarium',
-          maxzoom: 12
+          url: `https://api.maptiler.com/tiles/terrain-rgb-v2/tiles.json?key=${MAPTILER_KEY}`,
+          tileSize: 256
         });
       } catch (err) {}
     }
